@@ -29,3 +29,6 @@ There are only two files that test major cases for graph structure.
 
 With `Networkx`, I take advantage of its random graph generation and its SCC implementation to use
 as a reference, and `assert` that my calculated SCC is the same as theirs for 1000 random binomial graphs of (100, 0.2).
+
+The implementation is able to run in $O(V + E)$ time because we can get an ordering of the nodes from DFS without
+needing to sort. Every other operation is a DFS or graph reversal, both of which are $O(V + E)$
