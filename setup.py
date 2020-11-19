@@ -16,7 +16,7 @@ if __name__ == '__main__':
         url='https://github.com/Dariusrussellkish/Algorithms-HW4.git',
         author='Darius Russell Kish',
         packages=find_packages(),
-        install_requires=[],
+        install_requires=['networkx'],
         setup_requires=["pytest-runner"],
         tests_require=["pytest"],
         include_package_data=True,

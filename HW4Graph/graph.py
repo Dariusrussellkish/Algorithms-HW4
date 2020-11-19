@@ -1,9 +1,22 @@
 from collections import defaultdict
 from copy import deepcopy
 
+import re
+WNRE = re.compile(r'\(([-+]?[0-9]*\.?[0-9]+),\s*(.+?)\)')
+
+
+class NoPathError(Exception):
+    def __init__(self):
+        super().__init__()
+
+
+class NegativeEdgeCycleError(NoPathError):
+    def __init__(self):
+        super().__init__()
+
 
 class Node:
-    def __init__(self, id_):
+    def __init__(self, id_, weight=1.0):
         self.id = id_
         self.start = None
         self.finish = None
@@ -19,40 +32,58 @@ class Node:
 
 
 class Graph:
-    def __init__(self, adj_list):
+    def __init__(self, adj_list, weighted=False):
         self.graph = defaultdict(list)  # could be done with ints in guaranteed O(1), assume dict is O(1) lookup
-        id_to_vertex = dict()
+        self.id_to_vertex = dict()
+        self.weighted = weighted
+        self.edge_dict = defaultdict(dict)
         for line in adj_list:  # convert adj list to dict structure
             if not line:
                 continue
             try:  # try/except may not be needed anymore
-                node_1 = id_to_vertex[line[0]]
+                node_1 = self.id_to_vertex[line[0]]
             except KeyError:
                 node_1 = Node(line[0])
-                id_to_vertex[line[0]] = node_1
+                self.id_to_vertex[line[0]] = node_1
                 _ = self.graph[node_1]  # ensure node with no neighbors is in the graph
             if len(line) > 1:  # ensure we have neighbors to iterate over
-                for n2 in line[1:]:
-                    try:
-                        node_2 = id_to_vertex[n2]
-                    except KeyError:
-                        node_2 = Node(n2)
-                        id_to_vertex[n2] = node_2
-                    self.graph[node_1].append(node_2)
-                    _ = self.graph[node_2]  # ensure ill-defined adj lists are valid
+                if not weighted:
+                    for n2 in line[1:]:
+                        try:
+                            node_2 = self.id_to_vertex[n2]
+                        except KeyError:
+                            node_2 = Node(n2)
+                            self.id_to_vertex[n2] = node_2
+                        self.graph[node_1].append(node_2)
+                        _ = self.graph[node_2]  # ensure ill-defined adj lists are valid
+                else:
+                    for w, n2 in line[1:]:
+                        try:
+                            node_2 = self.id_to_vertex[n2]
+                        except KeyError:
+                            node_2 = Node(n2)
+                            self.id_to_vertex[n2] = node_2
+                        self.graph[node_1].append(node_2)
+                        _ = self.graph[node_2]  # ensure ill-defined adj lists are valid
+                        self.edge_dict[(node_1, node_2)]['w'] = w
 
     @staticmethod
-    def from_file(filepath):
+    def from_file(filepath, weighted=False):
         with open(filepath, 'r') as fh:
-            return Graph.from_strlike(fh)
+            return Graph.from_strlike(fh, weighted=weighted)
 
     @staticmethod
-    def from_strlike(str):
+    def from_strlike(str, weighted=False):            
         adj_list = []
         for line in str:
             nodes = line.strip().split()
+            if weighted:
+                nodes = [nodes[0]]
+                rest = WNRE.findall(line.strip())
+                for match in rest:
+                    nodes.append((float(match.group(1)), match.group(2)))
             adj_list.append(nodes)
-        return Graph(adj_list)
+        return Graph(adj_list, weighted=weighted)
     
     @property
     def edges(self):
@@ -155,3 +186,62 @@ def strongly_connected_components(G: Graph):
     G = G.T  # O(V + E)
     for component in DFS(G, sort_by_finish=True, order=finished):  # O(V + E)
         yield component
+
+
+def find_path_or_error(p, s, t):
+    curr = t
+    path = []
+    while curr != s:
+        if type(curr) is list:
+            if len(curr) == 0:
+                break
+            curr = curr[0]
+        path.append(curr)
+        if p[curr] is None:
+            raise NoPathError()
+        curr = p[curr]
+    if not s in path:
+        path.append(s)
+    return reversed(path)
+
+
+def dijkstra(G: Graph, s: Node, t: Node):
+    import heapq
+    Q = []
+    d = defaultdict(lambda: float('inf'))
+    p = defaultdict(lambda: None)
+    heapq.heappush(Q, (0.0, s))
+    p[s] = s
+    while len(Q) != 0:  # Page 16 of https://www3.cs.stonybrook.edu/~rezaul/papers/TR-07-54.pdf
+        w, v = heapq.heappop(Q)
+        if w <= d[v]:
+            d[v] = w
+            for nbr in G[v]:
+                if (wn := d[v] + G.edge_dict[(v, nbr)]['w']) < d[nbr]:
+                    heapq.heappush(Q, (wn, nbr))
+                    d[nbr] = wn
+                    p[nbr] = v
+    return find_path_or_error(p, s, t)
+
+
+def bellman_ford(G: Graph, s: Node, t: Node):
+    d = defaultdict(lambda: float('inf'))
+    p = defaultdict(lambda: None)
+
+    d[s] = 0.
+    # relaxation
+    for _ in range(len(G.nodes)):
+        for (u, v) in G.edge_dict.keys():
+            w = G.edge_dict[(u, v)]['w']
+            if d[u] + w < d[v]:
+                d[v] = d[u] + w
+                p[v] = u
+
+    # negative edge cycle detection
+    for (u, v) in G.edge_dict.keys():
+        w = G.edge_dict[(u, v)]['w']
+        if d[u] + w < d[v]:
+            raise NegativeEdgeCycleError()
+
+    return find_path_or_error(p, s, t)
+
